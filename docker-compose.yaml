@@ -1,0 +1,39 @@
+version: '3'
+
+services:
+  postgres-db:
+    image: postgres:latest
+    # network_mode: host
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_PASSWORD=entersecretpassword
+    # volumes:
+    #   - pg-database:/var/lib/postgresql/data
+    
+  python_cont_1:
+    image: aii-python3:latest
+    depends_on:
+      - postgres-db
+    # network_mode: host
+    environment:
+      - LOG_LEVEL=DEBUG
+      - POSTGRES_SERVICE_NAME=postgres-db
+    volumes:
+      - ./container1/:/workspace/
+    command: tail -f /dev/null
+
+  python_cont_2:
+    image: aii-python3:latest
+    depends_on:
+      - python_cont_1
+    # network_mode: host
+    environment:
+      - LOG_LEVEL=DEBUG
+      - POSTGRES_SERVICE_NAME=postgres-db
+    volumes:
+      - ./container2/:/workspace/
+    command: tail -f /dev/null
+
+# volumes:
+#   pg-database:
