@@ -67,6 +67,7 @@ UPDATE_CURRENT_FACTORY_INFO = "update_current_factory_info"
 UPDATE_CURRENT_MACHINE_CONTROL_FLAGS = "update_machine_control_flags"
 UPDATE_CURRENT_COMMAND = "generate_current_command"
 CHECK_TO_INSERT_REMOTE_CONTROL_FALSE_RECORD = "check_to_insert_remote_control_false_record"
+INSERT_ROS_NODES_ERROR_RECORD = "insert_ros_nodes_error_record"
 INSERT_PANEL_SELECTIONS_RECORD = "insert_panel_selection_record"
 INSERT_SELF_URGENT_STOP_COMMANDS_RECORD = "insert_self_urgent_stop_commands_record"
 INSERT_COMMANDS_RECORD = "insert_commands_record"
@@ -80,6 +81,7 @@ DISABLE_ENABLE_RECORD_INSERTED_TRIGGER_ONE = "disable_enable_record_inserted_tri
 DISABLE_ENABLE_RECORD_INSERTED_TRIGGER_TWO = "disable_enable_record_inserted_trigger_two"
 REMOTE_CONTROL_RECORD_BEFORE_INSERTED_TRIGGER = "remote_control_record_before_insert_trigger"
 REMOTE_CONTROL_RECORD_INSERTED_TRIGGER = "remote_control_record_inserted_trigger"
+ROS_NODES_ERROR_RECORD_BEFORE_INSERTED_TRIGGER = "ros_nodes_error_record_before_inserted_trigger"
 ROS_NODES_ERROR_RECORD_INSERTED_TRIGGER = "ros_nodes_error_record_inserted_trigger"
 TECHNICIAN_COMMANDS_RECORD_BEFORE_INSERTED_TRIGGER = "technician_commands_record_before_inserted_trigger"
 TECHNICIAN_COMMANDS_RECORD_INSERTED_TRIGGER = "technician_commands_record_inserted_trigger"
@@ -299,7 +301,7 @@ DATABASE_TABLES = {
             factory_id VARCHAR(56),
             machine_id INTEGER REFERENCES {MACHINE_INFO}(id) NULL,
             error_start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            error_end_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            error_end_time TIMESTAMP DEFAULT NULL
         );
     """,
     ROS_NODES_CONFIGS: f"""
@@ -510,11 +512,24 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
         END;
         $$ LANGUAGE plpgsql;
     """,
+    INSERT_ROS_NODES_ERROR_RECORD : f"""
+        CREATE OR REPLACE FUNCTION {INSERT_ROS_NODES_ERROR_RECORD} ()
+        RETURNS TRIGGER AS $$
+        DECLARE
+            _factory_id VARCHAR;
+            machine_id INTEGER;
+        BEGIN
+            SELECT factory_id INTO _factory_id FROM {CURRENT_FACTORY_INFO};
+            SELECT id INTO machine_id FROM {MACHINE_INFO};
+            NEW.factory_id := _factory_id;
+            NEW.machine_id := machine_id;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    """,
     INSERT_SELF_URGENT_STOP_COMMANDS_RECORD : f"""
         CREATE OR REPLACE FUNCTION {INSERT_SELF_URGENT_STOP_COMMANDS_RECORD} ()
         RETURNS TRIGGER AS $$
-        DECLARE
-            current_panel_selection_id INTEGER;
         BEGIN
             IF TG_NAME = '{ROS_NODES_ERROR_RECORD_INSERTED_TRIGGER}' THEN
                 INSERT INTO {SELF_URGENT_STOP_COMMANDS_RECORD} (error_id)
@@ -958,6 +973,17 @@ TRIGGERS_CREATE_SQL_COMMAND_STRING = f"""
                 BEFORE INSERT ON {REMOTE_CONTROL_RECORD}
                 FOR EACH ROW
                 EXECUTE FUNCTION {TURN_OFF_IS_LATEST_FLAG}('{REMOTE_CONTROL_RECORD}');
+            END IF;
+        END $$;
+
+        -- Trigger on before new ros nodes error data inserted to add factory id and machine_id
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = '{ROS_NODES_ERROR_RECORD_BEFORE_INSERTED_TRIGGER}') THEN
+                CREATE TRIGGER {ROS_NODES_ERROR_RECORD_BEFORE_INSERTED_TRIGGER}
+                BEFORE INSERT ON {ROS_NODES_ERROR_RECORD}
+                FOR EACH ROW
+                EXECUTE FUNCTION {INSERT_ROS_NODES_ERROR_RECORD}();
             END IF;
         END $$;
 
