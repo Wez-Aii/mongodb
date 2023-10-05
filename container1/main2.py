@@ -246,7 +246,7 @@ DATABASE_TABLES = {
     PANEL_SELECTIONS_RECORD: f"""
         CREATE TABLE {PANEL_SELECTIONS_RECORD} (
             id SERIAL PRIMARY KEY,
-            valid_panel_selection_id INTEGER REFERENCES {VALID_PANEL_SELECTION}(id),
+            command_str VARCHAR(8),
             factory_id VARCHAR(56),
             machine_id INTEGER REFERENCES {MACHINE_INFO}(id) NULL,
             is_uploaded BOOLEAN NOT NULL DEFAULT false,
@@ -393,12 +393,13 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
             _factory_id VARCHAR;
             machine_id INTEGER;
             _is_remote_id_col BOOLEAN;
-            _is_command_str_col BOOLEAN;
-            _is_panel_selection_id BOOLEAN;
             _latest_data_before_insert RECORD;
             _is_activated BOOLEAN;
             _is_remote_agent_col BOOLEAN;
+            _is_local_self_stop BOOLEAN;
             _panel_selection_id INTEGER;
+            _timeout_sec INTEGER;
+            _time_difference INTEGER;
         BEGIN
             SELECT factory_id INTO _factory_id FROM {CURRENT_FACTORY_INFO};
             SELECT id INTO machine_id FROM {MACHINE_INFO};
@@ -418,12 +419,7 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
             ELSE
                 SELECT true INTO _is_remote_id_col FROM information_schema.columns
                 WHERE table_name = TG_TABLE_NAME AND column_name = 'remote_id';
-                SELECT true INTO _is_command_str_col FROM information_schema.columns
-                WHERE table_name = TG_TABLE_NAME AND column_name = 'command_str';
-                SELECT true INTO _is_panel_selection_id FROM information_schema.columns
-                WHERE table_name = TG_TABLE_NAME AND column_name = 'panel_selection_id';
-                IF _is_remote_id_col AND _is_command_str_col THEN
-                    NEW.factory_id := 'not sure';
+                IF _is_remote_id_col THEN
                     IF (NEW.command_str = _latest_data_before_insert.command_str) 
                     AND (NEW.remote_id = _latest_data_before_insert.remote_id) THEN
                         SELECT true INTO _is_remote_agent_col FROM information_schema.columns
@@ -437,48 +433,52 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
                                     RETURN NULL;
                                 END IF;
                             END IF;
-                            NEW.factory_id := 'it is agent';
                         ELSE
+                            -- if not from cloud, the command can only be diags command which have timeout
+                            -- So, When the command_str is the same, the incoming command should get block until the timeout
                             SELECT is_activated INTO _is_activated FROM {COMMANDS_RECORD} 
                             WHERE technician_command_id = _latest_data_before_insert.id;
                             -- _is_activated can be null if row not found with the condition provided
                             IF _is_activated IS NOT NULL THEN
                                 IF _is_activated THEN
-                                    RETURN NULL;
+                                    SELECT timeout_sec INTO _timeout_sec FROM {COMMAND_MAP} 
+                                    WHERE command_str = _latest_data_before_insert.command_str;
+                                    IF _timeout_sec > 0 THEN
+                                        _time_difference := EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - _latest_data_before_insert.timestamp))::INTEGER;
+                                        IF _time_difference < _timeout_sec THEN
+                                            RETURN NULL;
+                                        END IF;
+                                    END IF;
                                 END IF;
                             END IF;
-                            NEW.factory_id := 'it is technician';
-                        END IF;
-                    END IF;
-                    NEW.machine_id := machine_id;
-                    RETURN NEW;
-                ELSIF _is_command_str_col THEN
-                    -- condition for self_urgent_stop table where remote_id not exist
-                    -- for self_urgent_stop table, just insert without any condition
-                    NEW.factory_id := _factory_id;
-                    NEW.machine_id := machine_id;
-                    RETURN NEW;
-                ELSIF _is_panel_selection_id THEN
-                    IF NEW.panel_selection_id = _latest_data_before_insert.panel_selection_id THEN
-                        SELECT panel_selection_id INTO _panel_selection_id FROM {COMMANDS_RECORD}
-                        ORDER BY timestamp DESC LIMIT 1;
-                        SELECT is_activated INTO _is_activated FROM {COMMANDS_RECORD} 
-                        WHERE panel_selection_id = _latest_data_before_insert.id;
-                        -- _is_activated can be null if row not found with the condition provided
-                        -- _panel_selection_id will be null if not the latest, 
-                        -- this condition is required to check, unlike the remote commands 
-                        -- because it does not have session period indicator like remote_id
-                        IF _is_activated IS NOT NULL AND _panel_selection_id IS NOT NULL THEN
-                            IF _is_activated THEN
-                                RETURN NULL;
-                            END IF;
-                        END IF;
+                        END IF;                            
                     END IF;
                     NEW.factory_id := _factory_id;
                     NEW.machine_id := machine_id;
                     RETURN NEW;
                 ELSE
-                    RETURN NULL;
+                    IF NEW.command_str = _latest_data_before_insert.command_str THEN
+                        SELECT true INTO _is_local_self_stop FROM information_schema.columns
+                        WHERE table_name = TG_TABLE_NAME AND column_name = 'error_id';
+                        IF _is_local_self_stop IS NULL THEN
+                            SELECT panel_selection_id INTO _panel_selection_id FROM {COMMANDS_RECORD}
+                            ORDER BY timestamp DESC LIMIT 1;
+                            SELECT is_activated INTO _is_activated FROM {COMMANDS_RECORD} 
+                            WHERE panel_selection_id = _latest_data_before_insert.id;
+                            -- _is_activated can be null if row not found with the condition provided
+                            -- _panel_selection_id will be null if not the latest, 
+                            -- this condition is required to check, unlike the remote commands 
+                            -- because it does not have session period indicator like remote_id
+                            IF _is_activated IS NOT NULL AND _panel_selection_id IS NOT NULL THEN
+                                IF _is_activated THEN
+                                    RETURN NULL;
+                                END IF;
+                            END IF;
+                        END IF;
+                    END IF;
+                    NEW.factory_id := _factory_id;
+                    NEW.machine_id := machine_id;
+                    RETURN NEW;
                 END IF;
             END IF;
         END;
@@ -549,6 +549,7 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
         RETURNS TRIGGER AS $$
         DECLARE
             eq_panel_selection_id INTEGER;
+            _command_str VARCHAR;
         BEGIN
             SELECT cm.eq_panel_selection_id INTO eq_panel_selection_id
             FROM {COMMANDS_RECORD} AS cr
@@ -559,12 +560,12 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
 
             -- If no matching row is found
             IF eq_panel_selection_id IS NULL THEN
-                INSERT INTO {PANEL_SELECTIONS_RECORD} (panel_selection_id)
-                VALUES (NEW.panel_selection_id);
+                INSERT INTO {PANEL_SELECTIONS_RECORD} (command_str)
+                VALUES (CAST(NEW.valid_panel_selection_id AS text));
             ELSE
-                IF eq_panel_selection_id <> NEW.panel_selection_id THEN
-                    INSERT INTO {PANEL_SELECTIONS_RECORD} (panel_selection_id)
-                    VALUES (NEW.panel_selection_id);
+                IF eq_panel_selection_id <> NEW.valid_panel_selection_id THEN
+                    INSERT INTO {PANEL_SELECTIONS_RECORD} (command_str)
+                    VALUES (CAST(NEW.valid_panel_selection_id AS text));
                 END IF;
             END IF;
             RETURN NEW;
@@ -577,24 +578,21 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
         DECLARE
             _command_map_id INTEGER;
         BEGIN
-            IF TG_NAME = '{PANEL_SELECTIONS_RECORD_INSERTED_TRIGGER}' THEN
-                SELECT id INTO _command_map_id FROM {COMMAND_MAP} WHERE command_str = to_char(NEW.panel_selection_id, 'FM999');
+            SELECT id INTO _command_map_id FROM {COMMAND_MAP} WHERE command_str = NEW.command_str;
+            IF TG_NAME = '{PANEL_SELECTIONS_RECORD_INSERTED_TRIGGER}' THEN                
                 INSERT INTO {COMMANDS_RECORD} (command_map_id, panel_selection_id)
                 VALUES (_command_map_id, NEW.id);
             ELSIF TG_NAME = '{TECHNICIAN_COMMANDS_RECORD_INSERTED_TRIGGER}' THEN
-                IF EXISTS (SELECT 1 FROM {REMOTE_CONTROL_RECORD} WHERE id = NEW.remote_id AND is_latest = true) THEN
-                    SELECT id INTO _command_map_id FROM {COMMAND_MAP} WHERE command_str = NEW.command_str;
+                IF EXISTS (SELECT 1 FROM {REMOTE_CONTROL_RECORD} WHERE id = NEW.remote_id AND is_latest = true) THEN                    
                     INSERT INTO {COMMANDS_RECORD} (command_map_id, technician_command_id)
                     VALUES (_command_map_id, NEW.id);
                 END IF;
             ELSIF TG_NAME = '{CALL_CENTER_COMMANDS_RECORD_INSERTED_TRIGGER}' THEN
-                IF EXISTS (SELECT 1 FROM {REMOTE_CONTROL_RECORD} WHERE id = NEW.remote_id AND is_latest = true) THEN
-                    SELECT id INTO _command_map_id FROM {COMMAND_MAP} WHERE command_str = NEW.command_str;
+                IF EXISTS (SELECT 1 FROM {REMOTE_CONTROL_RECORD} WHERE id = NEW.remote_id AND is_latest = true) THEN                    
                     INSERT INTO {COMMANDS_RECORD} (command_map_id, call_center_command_id)
                     VALUES (_command_map_id, NEW.id);
                 END IF;
-            ELSIF TG_NAME = '{SELF_URGENT_STOP_COMMANDS_RECORD_INSERTED_TRIGGER}' THEN
-                SELECT id INTO _command_map_id FROM {COMMAND_MAP} WHERE command_str = NEW.command_str;
+            ELSIF TG_NAME = '{SELF_URGENT_STOP_COMMANDS_RECORD_INSERTED_TRIGGER}' THEN                
                 INSERT INTO {COMMANDS_RECORD} (command_map_id, self_urgent_stop_id)
                 VALUES (_command_map_id, NEW.id);
             END IF;
