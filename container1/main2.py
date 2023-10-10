@@ -15,7 +15,8 @@ from datetime import datetime
 
 TIMEZONE = os.getenv("TIMEZONE", "Asia/Bangkok")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-POSTGRES_SERVICE_NAME = os.getenv("POSTGRES_SERVICE_NAME","localhost")
+# POSTGRES_SERVICE_NAME = os.getenv("POSTGRES_SERVICE_NAME","localhost")
+POSTGRES_DB_IP = "localhost"
 MIN_SEQUENCE_COMMANDS_WAIT_TIME = os.getenv("MIN_SEQUENCE_COMMANDS_WAIT_TIME", 10)
 
 LOGGING_LEVEL_DICT = {
@@ -41,8 +42,8 @@ PANEL_SELECTIONS_RECORD = "panel_selections_record"
 SELF_URGENT_STOP_COMMANDS_RECORD = "self_urgent_stop_commands_record"
 COMMANDS_RECORD = "commands_record"
 ROS_NODES_CONFIGS = "ros_nodes_configs"
-MODES_RECORD = "modes_record"
 COMMAND_MAP = "command_map"
+COMMAND_MAP_NODE_CONFIG_MAP = "command_map_node_config_map"
 MACHINE_DISABLE_ENABLE_RECORD = "machine_disable_enable_record"
 REMOTE_CONTROL_RECORD = "remote_control_record"
 MACHINE_REGISTRATION_RECORD = "machine_registration_record"
@@ -62,7 +63,8 @@ CURRENT_NODES_STATUS = "current_nodes_status"
 CURRENT_SORTER_DISPLAY = "current_sorter_display"
 
 ''' Store Procedures '''
-TURN_OFF_IS_LATEST_FLAG = "TURN_OFF_IS_LATEST_FLAG"
+TURN_OFF_IS_LATEST_FLAG = "turn_off_is_latest_flag"
+TURN_OFF_IS_ACTIVE_FLAG = "turn_off_is_active_flag"
 UPDATE_CURRENT_FACTORY_INFO = "update_current_factory_info"
 UPDATE_CURRENT_MACHINE_CONTROL_FLAGS = "update_machine_control_flags"
 UPDATE_CURRENT_COMMAND = "generate_current_command"
@@ -93,6 +95,7 @@ SELF_URGENT_STOP_COMMANDS_RECORD_BEFORE_INSERTED_TRIGGER = "self_urgent_stop_com
 SELF_URGENT_STOP_COMMANDS_RECORD_INSERTED_TRIGGER = "self_urgent_stop_commands_record_inserted_trigger"
 CURRENT_PANEL_SELECTION_UPDATED_TRIGGER = "current_panel_selection_updated_trigger"
 COMMANDS_RECORD_INSERTED_TRIGGER = "commands_record_inserted_trigger"
+COMMAND_MAP_NODE_CONFIG_MAP_BEFORE_INSERT_TRIGGER = "command_map_node_config_map_before_insert_trigger"
 
 TABLES_WITH_DEFAULT_ROW = [CURRENT_FACTORY_INFO, CURRENT_MACHINE_CONTROL_FLAGS, CURRENT_COMMAND, CURRENT_PANEL_SELECTION]
 
@@ -277,6 +280,27 @@ DATABASE_TABLES = {
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """,
+    ROS_NODES_CONFIGS: f"""
+        CREATE TABLE {ROS_NODES_CONFIGS} (
+            id SERIAL PRIMARY KEY,
+            node_type VARCHAR(56),
+            config JSON,
+            factory_id VARCHAR(56),
+            machine_id INTEGER REFERENCES {MACHINE_INFO}(id) NULL,
+            is_uploaded BOOLEAN NOT NULL DEFAULT false,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """,
+    COMMAND_MAP_NODE_CONFIG_MAP: f"""
+        CREATE TABLE {COMMAND_MAP_NODE_CONFIG_MAP} (
+            id SERIAL PRIMARY KEY,
+            command_map_id INTEGER REFERENCES {COMMAND_MAP}(id),
+            ros_node_config_id INTEGER REFERENCES {ROS_NODES_CONFIGS}(id),
+            node_type VARCHAR(56),
+            is_active BOOLEAN NOT NULL DEFAULT true,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """,
     COMMANDS_RECORD: f"""
         CREATE TABLE {COMMANDS_RECORD} (
             id SERIAL PRIMARY KEY,
@@ -302,17 +326,6 @@ DATABASE_TABLES = {
             machine_id INTEGER REFERENCES {MACHINE_INFO}(id) NULL,
             error_start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             error_end_time TIMESTAMP DEFAULT NULL
-        );
-    """,
-    ROS_NODES_CONFIGS: f"""
-        CREATE TABLE {ROS_NODES_CONFIGS} (
-            id SERIAL PRIMARY KEY,
-            node_type VARCHAR(56),
-            config JSON,
-            factory_id VARCHAR(56),
-            machine_id INTEGER REFERENCES {MACHINE_INFO}(id) NULL,
-            is_uploaded BOOLEAN NOT NULL DEFAULT false,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """,
     ROS_NODES_WARNING_RECORD: f"""
@@ -349,7 +362,7 @@ DATABASE_TABLES = {
             id SERIAL PRIMARY KEY,
             command_record_id INTEGER REFERENCES {COMMANDS_RECORD}(id) NULL,
             command_status_id INTEGER REFERENCES {VALID_COMMAND_STATUS}(id) NULL,
-            is_processed BOOLEAN NOT NULL DEFAULT false,
+            consecutive_failed_command_count INTEGER DEFAULT 0,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """,
@@ -381,6 +394,16 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
                     NEW.session_expired_time := CURRENT_TIMESTAMP + (NEW.requested_time_minute * INTERVAL '1 minutes');
                 END IF;
             END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    """,
+    TURN_OFF_IS_ACTIVE_FLAG : f"""
+        CREATE OR REPLACE FUNCTION {TURN_OFF_IS_ACTIVE_FLAG}()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            SELECT node_type INTO NEW.node_type FROM {ROS_NODES_CONFIGS} WHERE id = NEW.ros_node_config_id;
+            UPDATE {COMMAND_MAP_NODE_CONFIG_MAP} SET is_active = true WHERE command_map_id = NEW.command_map_id AND node_type = NEW.node_type;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
@@ -614,6 +637,7 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
             _is_remote BOOLEAN;
             _is_register BOOLEAN;
             _is_disabled BOOLEAN;
+            _is_currently_error BOOLEAN;
             selected_command_id INTEGER;
         BEGIN
             SELECT vps.valid_value, vm.valid_value INTO _command_record_panel_selection, _mode_type FROM {COMMANDS_RECORD} AS cr
@@ -634,9 +658,11 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
             LEFT JOIN {MACHINE_REGISTRATION_RECORD} AS mr ON cmc.registration_id = mr.id
             LEFT JOIN {MACHINE_DISABLE_ENABLE_RECORD} AS mde ON cmc.disable_enable_id = mde.id; 
 
+            SELECT true INTO _is_currently_error FROM {ROS_NODES_ERROR_RECORD} WHERE error_end_time IS NULL;
+
             IF _mode_type = 'oper' THEN
                 -- condition to check if the incoming command should be block or not when it comes to all_start         
-                IF ((_command_record_panel_selection IN ('aa', 'a', 'b')) AND (_current_command_panel_selection NOT IN ('aa', 'a', 'b'))) 
+                IF ((_command_record_panel_selection IN ('aa', 'a', 'b') AND _is_currently_error IS NULL) AND (_current_command_panel_selection NOT IN ('aa', 'a', 'b'))) 
                 OR (_command_record_panel_selection = 'off') THEN
                     IF _is_register THEN
                         IF _is_remote THEN
@@ -676,7 +702,7 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
                             END IF;
                         ELSE
                             -- only response to local invalid start command if both is_disabled and _is_remote are false else do not reponse
-                            IF _is_disabled = false AND _is_remote = false THEN
+                            IF EXISTS (SELECT 1 FROM {COMMANDS_RECORD} WHERE id = NEW.id AND panel_selection_id IS NOT NULL) AND _is_disabled = false THEN
                                 -- incoming command is invalid start command and get block, then self urgent stop will get generated
                                 INSERT INTO {SELF_URGENT_STOP_COMMANDS_RECORD} (invalid_command_record_id) 
                                 VALUES (NEW.id);
@@ -732,8 +758,9 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
             END IF;
             IF selected_command_id IS NOT NULL THEN
                 UPDATE {CURRENT_COMMAND} 
-                SET command_record_id = selected_command_id, 
-                    command_status_id = 1;
+                SET command_record_id = selected_command_id,
+                    command_status_id = 1,
+                    timestamp = CURRENT_TIMESTAMP;
             END IF;
             UPDATE {COMMANDS_RECORD} 
             SET is_processed = true, 
@@ -742,147 +769,6 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
         END;
         $$ LANGUAGE plpgsql;
     """,
-    # for backup purpose
-    # UPDATE_CURRENT_COMMAND : f"""
-    #     CREATE OR REPLACE FUNCTION {UPDATE_CURRENT_COMMAND} ()
-    #     RETURNS TRIGGER AS $$
-    #     DECLARE
-    #         selected_command RECORD;
-    #         _mode_type VARCHAR;
-    #         _current_command_panel_selection VARCHAR;
-    #         _command_record_panel_selection VARCHAR;
-    #         _current_remote_id INTEGER;
-    #         _command_remote_id INTEGER;
-    #         _is_remote BOOLEAN;
-    #         _is_register BOOLEAN;
-    #         _is_disabled BOOLEAN;
-    #         selected_command_id INTEGER;
-    #     BEGIN
-    #         SELECT vps.valid_value, vm.valid_value INTO _command_record_panel_selection, _mode_type FROM {COMMANDS_RECORD} AS cr
-    #         JOIN {COMMAND_MAP} AS cm ON cr.command_map_id = cm.id
-    #         JOIN {VALID_MODE} AS vm ON cm.mode_id = vm.id
-    #         JOIN {VALID_PANEL_SELECTION} AS vps ON cm.eq_panel_selection_id = vps.id
-    #         WHERE cr.id = NEW.id;
-
-    #         SELECT vps.valid_value INTO _current_command_panel_selection FROM {CURRENT_COMMAND} as cc
-    #         JOIN {COMMANDS_RECORD} AS cr ON cc.command_record_id = cr.id
-    #         JOIN {COMMAND_MAP} AS cm ON cr.command_map_id = cm.id
-    #         JOIN {VALID_PANEL_SELECTION} AS vps ON cm.eq_panel_selection_id = vps.id;
-
-    #         SELECT cmc.remote_id, rc.is_remote, mr.is_registered, mde.is_disabled 
-    #         INTO _current_remote_id, _is_remote, _is_register, _is_disabled
-    #         FROM {CURRENT_MACHINE_CONTROL_FLAGS} AS cmc
-    #         LEFT JOIN {REMOTE_CONTROL_RECORD} AS rc ON cmc.remote_id = rc.id
-    #         LEFT JOIN {MACHINE_REGISTRATION_RECORD} AS mr ON cmc.registration_id = mr.id
-    #         LEFT JOIN {MACHINE_DISABLE_ENABLE_RECORD} AS mde ON cmc.disable_enable_id = mde.id; 
-
-    #         IF _mode_type = 'oper' THEN
-    #             -- condition to check if the incoming command should be block or not when it comes to all_start         
-    #             IF ((_command_record_panel_selection IN ('aa', 'a', 'b')) AND (_current_command_panel_selection NOT IN ('aa', 'a', 'b'))) 
-    #             OR (_command_record_panel_selection = 'off') THEN
-    #                 IF _is_register THEN
-    #                     IF _is_remote THEN
-    #                         IF EXISTS (SELECT 1 FROM {COMMANDS_RECORD} WHERE id = NEW.id AND call_center_command_id IS NOT NULL) THEN
-    #                             SELECT ccc.remote_id INTO _command_remote_id FROM {COMMANDS_RECORD} AS cr
-    #                             JOIN {CALL_CENTER_COMMANDS_RECORD} AS ccc ON cr.call_center_command_id = ccc.id
-    #                             WHERE cr.id = NEW.id;
-    #                             IF _command_remote_id = _current_remote_id THEN
-    #                                 selected_command_id := NEW.id;   
-    #                             END IF;                             
-    #                         ELSIF _is_disabled = false THEN
-    #                             IF EXISTS (SELECT 1 FROM {COMMANDS_RECORD} 
-    #                             WHERE id = NEW.id AND (panel_selection_id IS NOT NULL OR self_urgent_stop_id IS NOT NULL)) THEN
-    #                                 selected_command_id := NEW.id;
-    #                             END IF;
-    #                         ELSE
-    #                             IF EXISTS (SELECT 1 FROM {COMMANDS_RECORD} 
-    #                             WHERE id = NEW.id AND self_urgent_stop_id IS NOT NULL) THEN
-    #                                 selected_command_id := NEW.id;
-    #                             END IF;
-    #                         END IF;
-    #                     ELSIF _is_disabled = false THEN
-    #                         IF EXISTS (SELECT 1 FROM {COMMANDS_RECORD} 
-    #                         WHERE id = NEW.id AND (panel_selection_id IS NOT NULL OR self_urgent_stop_id IS NOT NULL)) THEN
-    #                             selected_command_id := NEW.id;
-    #                         END IF;
-    #                     ELSE
-    #                         IF EXISTS (SELECT 1 FROM {COMMANDS_RECORD} 
-    #                         WHERE id = NEW.id AND self_urgent_stop_id IS NOT NULL) THEN
-    #                             selected_command_id := NEW.id;
-    #                         END IF;
-    #                     END IF;
-    #                 END IF;
-    #             ELSE
-    #                 IF _is_register THEN
-    #                     IF EXISTS (SELECT 1 FROM {COMMANDS_RECORD} WHERE id = NEW.id AND call_center_command_id IS NOT NULL) THEN
-    #                         -- only response to remote invalid start command if the remote is true else do not response
-    #                         IF _is_remote THEN
-    #                             -- incoming command is invalid start command and get block, then self urgent stop will get generated
-    #                             INSERT INTO {SELF_URGENT_STOP_COMMANDS_RECORD} (invalid_command_record_id) 
-    #                             VALUES (NEW.id);
-    #                         END IF;
-    #                     ELSE
-    #                         -- only response to local invalid start command if the disable is false else do not reponse
-    #                         IF _is_disabled = false THEN
-    #                             -- incoming command is invalid start command and get block, then self urgent stop will get generated
-    #                             INSERT INTO {SELF_URGENT_STOP_COMMANDS_RECORD} (invalid_command_record_id) 
-    #                             VALUES (NEW.id);
-    #                         END IF;
-    #                     END IF;
-    #                 END IF;
-    #             END IF;
-    #         ELSE
-    #             IF _is_remote THEN
-    #                 IF EXISTS (SELECT 1 FROM {COMMANDS_RECORD} WHERE id = NEW.id AND call_center_command_id IS NOT NULL) THEN
-    #                     SELECT ccc.remote_id INTO _command_remote_id FROM {COMMANDS_RECORD} AS cr
-    #                     JOIN {CALL_CENTER_COMMANDS_RECORD} AS ccc ON cr.call_center_command_id = ccc.id
-    #                     WHERE cr.id = NEW.id;
-    #                     IF (_command_remote_id = _current_remote_id) AND _current_command_panel_selection NOT IN ('aa','a','b') THEN
-    #                         selected_command_id := NEW.id;
-    #                     ELSE
-    #                         -- incoming command is invalid command and get block, then self urgent stop will get generated
-    #                         INSERT INTO {SELF_URGENT_STOP_COMMANDS_RECORD} (invalid_command_record_id) 
-    #                         VALUES (NEW.id);
-    #                     END IF;
-    #                 ELSIF EXISTS (SELECT 1 FROM {COMMANDS_RECORD} WHERE id = NEW.id AND technician_command_id IS NOT NULL) THEN
-    #                     SELECT tc.remote_id INTO _command_remote_id FROM {COMMANDS_RECORD} AS cr
-    #                     JOIN {TECHNICIAN_COMMANDS_RECORD} AS tc ON cr.technician_command_id = tc.id
-    #                     WHERE cr.id = NEW.id;
-    #                     IF (_command_remote_id = _current_remote_id) AND _current_command_panel_selection NOT IN ('aa','a','b') THEN
-    #                         selected_command_id := NEW.id;
-    #                     ELSE
-    #                         -- incoming command is invalid command and get block, then self urgent stop will get generated
-    #                         INSERT INTO {SELF_URGENT_STOP_COMMANDS_RECORD} (invalid_command_record_id) 
-    #                         VALUES (NEW.id);
-    #                     END IF;                 
-    #                 ELSIF EXISTS (SELECT 1 FROM {COMMANDS_RECORD} WHERE id = NEW.id AND panel_selection_id IS NOT NULL) THEN
-    #                     -- for local command it will only response to setup mode
-    #                     IF _mode_type = 'setup' THEN
-    #                         selected_command_id := NEW.id;
-    #                     END IF;
-    #                 END IF;
-    #             ELSE
-    #                 -- will only response to local setup mode if the remote is false
-    #                 IF EXISTS (SELECT 1 FROM {COMMANDS_RECORD} WHERE id = NEW.id AND panel_selection_id IS NOT NULL) THEN
-    #                     IF _mode_type = 'setup' THEN
-    #                         selected_command_id := NEW.id;
-    #                     END IF;
-    #                 END IF;
-    #             END IF;
-    #         END IF;
-    #         IF selected_command_id IS NOT NULL THEN
-    #             UPDATE {CURRENT_COMMAND} 
-    #             SET command_record_id = selected_command_id, 
-    #                 command_status_id = 1;
-    #         END IF;
-    #         UPDATE {COMMANDS_RECORD} 
-    #         SET is_processed = true, 
-    #             is_activated = CASE WHEN id = selected_command_id THEN true ELSE is_activated END;
-    #         RETURN NEW;
-    #     END;
-    #     $$ LANGUAGE plpgsql;
-    # """,
-
 }
 
 TRIGGERS_CREATE_SQL_COMMAND_STRING = f"""
@@ -1105,6 +991,17 @@ TRIGGERS_CREATE_SQL_COMMAND_STRING = f"""
                 EXECUTE FUNCTION {UPDATE_CURRENT_COMMAND}();
             END IF;
         END $$;
+
+        -- Trigger on before new command_map_node_config_map data inserted to check that all the is_active for the command_map with the node type is false
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = '{COMMAND_MAP_NODE_CONFIG_MAP_BEFORE_INSERT_TRIGGER}') THEN
+                CREATE TRIGGER {COMMAND_MAP_NODE_CONFIG_MAP_BEFORE_INSERT_TRIGGER}
+                BEFORE INSERT ON {COMMAND_MAP_NODE_CONFIG_MAP}
+                FOR EACH ROW
+                EXECUTE FUNCTION {TURN_OFF_IS_ACTIVE_FLAG}();
+            END IF;
+        END $$;
     """
 
 
@@ -1121,7 +1018,7 @@ class Testing:
             style="{",
         )
         self._machine_id = "machine123"
-        self._conn_str = self._get_valid_connection_str('testing', 'postgres', 'entersecretpassword', POSTGRES_SERVICE_NAME)
+        self._conn_str = self._get_valid_connection_str('aii_sortermachine', 'postgres', 'entersecretpassword', POSTGRES_DB_IP)
         self._setup_database()
         # self._machine_config = self._get_all_configs()
 
