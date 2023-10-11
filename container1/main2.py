@@ -417,7 +417,8 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
             machine_id INTEGER;
             _is_remote_id_col BOOLEAN;
             _latest_data_before_insert RECORD;
-            _is_activated BOOLEAN;
+            _latest_activated_command_record_data RECORD;
+            _is_latest_activated BOOLEAN;
             _is_remote_agent_col BOOLEAN;
             _is_local_self_stop BOOLEAN;
             _panel_selection_id INTEGER;
@@ -447,36 +448,26 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
                     AND (NEW.remote_id = _latest_data_before_insert.remote_id) THEN
                         SELECT true INTO _is_remote_agent_col FROM information_schema.columns
                         WHERE table_name = TG_TABLE_NAME AND column_name = 'agent_id';
-                        IF _is_remote_agent_col THEN
-                            SELECT is_activated INTO _is_activated FROM {COMMANDS_RECORD} 
-                            WHERE call_center_command_id = _latest_data_before_insert.id;
-                            -- _is_activated can be null if row not found with the condition provided
-                            IF _is_activated IS NOT NULL THEN
-                                IF _is_activated THEN
-                                    RETURN NULL;
-                                END IF;
-                            END IF;
-                        ELSE
-                            -- if not from cloud, the command can only be diags command which have timeout
-                            -- So, When the command_str is the same, the incoming command should get block until the timeout
-                            SELECT is_activated INTO _is_activated FROM {COMMANDS_RECORD} 
-                            WHERE technician_command_id = _latest_data_before_insert.id;
-                            -- _is_activated can be null if row not found with the condition provided
-                            IF _is_activated IS NOT NULL THEN
-                                IF _is_activated THEN
-                                    SELECT timeout_sec INTO _timeout_sec FROM {COMMAND_MAP} 
-                                    WHERE command_str = _latest_data_before_insert.command_str;
-                                    IF _timeout_sec > 0 THEN
-                                        _time_difference := EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - _latest_data_before_insert.timestamp))::INTEGER;
-                                        IF _time_difference < _timeout_sec THEN
-                                            RETURN NULL;
-                                        END IF;
+                        SELECT * INTO _latest_activated_command_record_data FROM {COMMANDS_RECORD}
+                        WHERE is_activated = true ORDER BY timestamp DESC LIMIT 1;
+                        IF _latest_activated_command_record_data.call_center_command_id = _latest_data_before_insert.id THEN
+                            IF _is_remote_agent THEN
+                                RETURN NULL;
+                            ELSE
+                                -- if not from cloud, the command can only be diags command which have timeout
+                                -- So, When the command_str is the same, the incoming command should get block until the timeout
+                                SELECT timeout_sec INTO _timeout_sec FROM {COMMAND_MAP} 
+                                WHERE command_str = _latest_data_before_insert.command_str;
+                                IF _timeout_sec > 0 THEN
+                                    _time_difference := EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - _latest_data_before_insert.timestamp))::INTEGER;
+                                    IF _time_difference < _timeout_sec THEN
+                                        RETURN NULL;
                                     END IF;
                                 END IF;
                             END IF;
-                        END IF;                            
+                        END IF;                       
                     END IF;
-                    NEW.factory_id := _factory_id;
+                    NEW.factory_id := '0ok';
                     NEW.machine_id := machine_id;
                     RETURN NEW;
                 ELSE
@@ -486,14 +477,15 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
                         IF _is_local_self_stop IS NULL THEN
                             SELECT panel_selection_id INTO _panel_selection_id FROM {COMMANDS_RECORD}
                             ORDER BY timestamp DESC LIMIT 1;
-                            SELECT is_activated INTO _is_activated FROM {COMMANDS_RECORD} 
-                            WHERE panel_selection_id = _latest_data_before_insert.id;
-                            -- _is_activated can be null if row not found with the condition provided
+                            SELECT true INTO _is_latest_activated FROM {COMMANDS_RECORD}
+                            WHERE panel_selection_id = _latest_data_before_insert.id AND is_activated = true 
+                            ORDER BY timestamp DESC LIMIT 1;
+                            -- _is_latest_activated can be null if row not found with the condition provided
                             -- _panel_selection_id will be null if not the latest, 
                             -- this condition is required to check, unlike the remote commands 
                             -- because it does not have session period indicator like remote_id
-                            IF _is_activated IS NOT NULL AND _panel_selection_id IS NOT NULL THEN
-                                IF _is_activated THEN
+                            IF _is_latest_activated IS NOT NULL AND _panel_selection_id IS NOT NULL THEN
+                                IF _is_latest_activated THEN
                                     RETURN NULL;
                                 END IF;
                             END IF;
