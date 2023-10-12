@@ -73,6 +73,8 @@ INSERT_ROS_NODES_ERROR_RECORD = "insert_ros_nodes_error_record"
 INSERT_PANEL_SELECTIONS_RECORD = "insert_panel_selection_record"
 INSERT_SELF_URGENT_STOP_COMMANDS_RECORD = "insert_self_urgent_stop_commands_record"
 INSERT_COMMANDS_RECORD = "insert_commands_record"
+CHECK_COMMAND_DURATION_TO_STOP = "check_command_duration_to_stop"
+GET_TOWERLIGHT_INDICATOR_FLAGS = "get_towerlight_indication_flags"
 
 ''' Triggers '''
 REGISTRATION_RECORD_BEFORE_INSERTED_TRIGGER = "registration_record_before_insert_trigger"
@@ -208,7 +210,7 @@ DATABASE_TABLES = {
         CREATE TABLE {REMOTE_CONTROL_RECORD} (
             id SERIAL PRIMARY KEY,
             is_remote BOOLEAN NOT NULL DEFAULT false,
-            requested_time_minute INTEGER DEFAULT 15,
+            session_requested_time_minute INTEGER DEFAULT 15,
             requested_by_id VARCHAR(56),
             requested_source_id INTEGER REFERENCES {VALID_SOURCE}(id),
             factory_id VARCHAR(56),
@@ -276,7 +278,7 @@ DATABASE_TABLES = {
             ros_command_str VARCHAR(56),
             eq_panel_selection_id INTEGER REFERENCES {VALID_PANEL_SELECTION}(id),
             mode_id INTEGER REFERENCES {VALID_MODE}(id),
-            timeout_sec INTEGER DEFAULT -1,
+            command_duration_sec INTEGER DEFAULT -1,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """,
@@ -390,8 +392,8 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
             -- deactive all the is_latest flag
             EXECUTE 'UPDATE ' || arg_table_name || ' SET is_latest = false';
             IF to_jsonb(NEW) ? 'session_expired_time' THEN
-                IF NEW.requested_time_minute > 0 THEN
-                    NEW.session_expired_time := CURRENT_TIMESTAMP + (NEW.requested_time_minute * INTERVAL '1 minutes');
+                IF NEW.session_requested_time_minute > 0 THEN
+                    NEW.session_expired_time := CURRENT_TIMESTAMP + (NEW.session_requested_time_minute * INTERVAL '1 minutes');
                 END IF;
             END IF;
             RETURN NEW;
@@ -451,23 +453,21 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
                         SELECT * INTO _latest_activated_command_record_data FROM {COMMANDS_RECORD}
                         WHERE is_activated = true ORDER BY timestamp DESC LIMIT 1;
                         IF _latest_activated_command_record_data.call_center_command_id = _latest_data_before_insert.id THEN
-                            IF _is_remote_agent THEN
-                                RETURN NULL;
-                            ELSE
-                                -- if not from cloud, the command can only be diags command which have timeout
-                                -- So, When the command_str is the same, the incoming command should get block until the timeout
-                                SELECT timeout_sec INTO _timeout_sec FROM {COMMAND_MAP} 
-                                WHERE command_str = _latest_data_before_insert.command_str;
-                                IF _timeout_sec > 0 THEN
-                                    _time_difference := EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - _latest_data_before_insert.timestamp))::INTEGER;
-                                    IF _time_difference < _timeout_sec THEN
-                                        RETURN NULL;
-                                    END IF;
+                            RETURN NULL;
+                        ELSIF _latest_activated_command_record_data.technician_command_id = _latest_data_before_insert.id THEN
+                            -- if not from cloud, the command can only be diags command which have timeout
+                            -- So, When the command_str is the same, the incoming command should get block until the timeout
+                            SELECT command_duration_sec INTO _timeout_sec FROM {COMMAND_MAP} 
+                            WHERE command_str = _latest_data_before_insert.command_str;
+                            IF _timeout_sec > 0 THEN
+                                _time_difference := EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - _latest_data_before_insert.timestamp))::INTEGER;
+                                IF _time_difference < _timeout_sec THEN
+                                    RETURN NULL;
                                 END IF;
                             END IF;
                         END IF;                       
                     END IF;
-                    NEW.factory_id := '0ok';
+                    NEW.factory_id := _factory_id;
                     NEW.machine_id := machine_id;
                     RETURN NEW;
                 ELSE
@@ -657,7 +657,7 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
                 IF ((_command_record_panel_selection IN ('aa', 'a', 'b') AND _is_currently_error IS NULL) AND (_current_command_panel_selection NOT IN ('aa', 'a', 'b'))) 
                 OR (_command_record_panel_selection = 'off') THEN
                     IF _is_register THEN
-                        IF _is_remote THEN
+                        IF _is_remote AND _is_disabled = false THEN
                             IF EXISTS (SELECT 1 FROM {COMMANDS_RECORD} WHERE id = NEW.id AND call_center_command_id IS NOT NULL) THEN
                                 SELECT ccc.remote_id INTO _command_remote_id FROM {COMMANDS_RECORD} AS cr
                                 JOIN {CALL_CENTER_COMMANDS_RECORD} AS ccc ON cr.call_center_command_id = ccc.id
@@ -685,16 +685,14 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
                     END IF;
                 ELSE
                     IF _is_register THEN
-                        IF EXISTS (SELECT 1 FROM {COMMANDS_RECORD} WHERE id = NEW.id AND call_center_command_id IS NOT NULL) THEN
-                            -- only response to remote invalid start command if the remote is true else do not response
-                            IF _is_remote THEN
-                                -- incoming command is invalid start command and get block, then self urgent stop will get generated
-                                INSERT INTO {SELF_URGENT_STOP_COMMANDS_RECORD} (invalid_command_record_id) 
-                                VALUES (NEW.id);
-                            END IF;
+                        -- only response to remote invalid start command if the remote is true else do not response
+                        IF EXISTS (SELECT 1 FROM {COMMANDS_RECORD} WHERE id = NEW.id AND call_center_command_id IS NOT NULL) AND _is_remote THEN
+                            -- incoming command is invalid start command and get block, then self urgent stop will get generated
+                            INSERT INTO {SELF_URGENT_STOP_COMMANDS_RECORD} (invalid_command_record_id) 
+                            VALUES (NEW.id);
                         ELSE
                             -- only response to local invalid start command if both is_disabled and _is_remote are false else do not reponse
-                            IF EXISTS (SELECT 1 FROM {COMMANDS_RECORD} WHERE id = NEW.id AND panel_selection_id IS NOT NULL) AND _is_disabled = false THEN
+                            IF EXISTS (SELECT 1 FROM {COMMANDS_RECORD} WHERE id = NEW.id AND panel_selection_id IS NOT NULL) AND _is_disabled = false AND _is_remote = false THEN
                                 -- incoming command is invalid start command and get block, then self urgent stop will get generated
                                 INSERT INTO {SELF_URGENT_STOP_COMMANDS_RECORD} (invalid_command_record_id) 
                                 VALUES (NEW.id);
@@ -758,6 +756,55 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
             SET is_processed = true, 
                 is_activated = CASE WHEN id = selected_command_id THEN true ELSE is_activated END;
             RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    """,
+    CHECK_COMMAND_DURATION_TO_STOP : f"""
+        CREATE OR REPLACE FUNCTION {CHECK_COMMAND_DURATION_TO_STOP}(command_map_id INT, record_time TIMESTAMP)
+        RETURNS BOOLEAN AS $$
+        DECLARE
+            _timeout_sec INT;
+            _time_difference INT;
+        BEGIN
+            SELECT command_duration_sec INTO _timeout_sec FROM {COMMAND_MAP} 
+            WHERE id = command_map_id;
+            IF _timeout_sec > 0 THEN
+                _time_difference := EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - record_time))::INTEGER;
+                IF _time_difference > _timeout_sec THEN
+                    RETURN true;
+                END IF;
+            END IF;
+            RETURN false;
+        END;
+        $$ LANGUAGE plpgsql;
+    """,
+    GET_TOWERLIGHT_INDICATOR_FLAGS : f"""
+        CREATE OR REPLACE FUNCTION {GET_TOWERLIGHT_INDICATOR_FLAGS}()
+        RETURNS jsonb AS $$
+        DECLARE
+            _is_remote BOOLEAN := false;
+            _is_unregistered BOOLEAN := false;
+            _is_disabled BOOLEAN := false;
+            _is_service BOOLEAN := false;
+            _is_error BOOLEAN := false;
+            _is_warning BOOLEAN := false;
+        BEGIN
+            SELECT is_remote INTO _is_remote FROM {REMOTE_CONTROL_RECORD} WHERE is_latest = true;
+            SELECT true INTO _is_unregistered FROM {MACHINE_REGISTRATION_RECORD} WHERE is_latest = true and is_registered = false;
+            SELECT is_disabled INTO _is_disabled FROM {MACHINE_DISABLE_ENABLE_RECORD} WHERE is_latest = true;
+            SELECT true INTO _is_service FROM current_command as ccmd 
+            LEFT JOIN commands_record AS cr ON cr.id = ccmd.command_record_id
+            LEFT JOIN command_map AS cmp ON cmp.id = cr.command_map_id WHERE cmp.eq_panel_selection_id = 5;
+            SELECT true INTO _is_error FROM {ROS_NODES_ERROR_RECORD} WHERE error_end_time IS NULL;
+            SELECT true INTO _is_warning FROM {ROS_NODES_WARNING_RECORD} WHERE warning_end_time IS NULL;
+            RETURN jsonb_build_object(
+                'is_remote', _is_remote,
+                'is_unregistered', _is_unregistered,
+                'is_disabled', _is_disabled,
+                'is_service', _is_service,
+                'is_error', _is_error,
+                'is_warning', _is_warning
+            );
         END;
         $$ LANGUAGE plpgsql;
     """,
@@ -1175,7 +1222,7 @@ class Testing:
             cur.execute(
                 f"""
                     INSERT INTO {REMOTE_CONTROL_RECORD} (
-                        is_remote, requested_time_minute, requested_by_id, requested_source_id, factory_id, machine_id
+                        is_remote, session_requested_time_minute, requested_by_id, requested_source_id, factory_id, machine_id
                     ) VALUES (%s, %s, %s, %s, %s, %s)
                     RETURNING id;
                 """, (_is_remote, _requested_time_minute, _requested_by_id, _requested_source_id, _factory_id, 1)

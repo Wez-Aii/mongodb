@@ -39,7 +39,7 @@ INSERT INTO ros_nodes_configs (id, node_type, config) VALUES
 (8, 'ejector', '{"aa":15}'),
 (9, 'conveyor', '{"speed":15}');
 
-INSERT INTO command_map (id, command_str, ros_command_str, eq_panel_selection_id, mode_id, timeout_sec) VALUES
+INSERT INTO command_map (id, command_str, ros_command_str, eq_panel_selection_id, mode_id, command_duration_sec) VALUES
 (1, 'cloud_b', 'ALL_START', 2, 2, -1),
 (2, 'cloud_a', 'ALL_START', 3, 2, -1),
 (3, 'cloud_aa', 'ALL_START', 4, 2, -1),
@@ -82,14 +82,14 @@ VALUES (true, '123', 3, '101', 'longan factory 101', 1);
 INSERT INTO machine_disable_enable_record (is_disabled, disabled_by_id, disabled_source_id, factory_id, machine_id)
 VALUES (false, '123', 3, '101', 1);
 
-INSERT INTO remote_control_record (is_remote, requested_time_minute, requested_by_id, requested_source_id, factory_id, machine_id)
-VALUES (true, 30, '11', 3, '101', 1);
+INSERT INTO remote_control_record (is_remote, session_requested_time_minute, requested_by_id, requested_source_id, factory_id, machine_id)
+VALUES (true, 1, '11', 3, '101', 1);
 
 INSERT INTO technician_commands_record (command_str, remote_id, technician_id)
 VALUES ('sys_diag_start_all', 6, '123');
 
 INSERT INTO call_center_commands_record (command_str, remote_id, agent_id)
-VALUES ('cloud_b', 17, '101');
+VALUES ('cloud_b', 1, '101');
 
 INSERT INTO ros_nodes_error_record (node_type, node_name, error_msg)
 VALUES ('controller', 'controller', 'testing_error');
@@ -104,7 +104,7 @@ SELECT * FROM machine_registration_record;
 
 SELECT * FROM machine_disable_enable_record;
 
-SELECT * FROM remote_control_record;
+SELECT * FROM remote_control_record ORDER BY timestamp DESC LIMIT 10;
 
 SELECT * FROM current_command;
 
@@ -132,6 +132,12 @@ SELECT * FROM self_urgent_stop_commands_record ORDER BY timestamp DESC LIMIT 10;
 
 SELECT * FROM ros_nodes_configs;
 
+SELECT true AS panel_selection_id
+FROM current_command as ccmd 
+LEFT JOIN commands_record AS cr ON cr.id = ccmd.command_record_id
+LEFT JOIN command_map AS cmp ON cmp.id = cr.command_map_id WHERE cmp.eq_panel_selection_id = 5;
+
+DROP FUNCTION get_towerlight_indication_flags();
 
 DO
 $$
