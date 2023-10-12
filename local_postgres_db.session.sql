@@ -89,7 +89,7 @@ INSERT INTO technician_commands_record (command_str, remote_id, technician_id)
 VALUES ('sys_diag_start_all', 6, '123');
 
 INSERT INTO call_center_commands_record (command_str, remote_id, agent_id)
-VALUES ('cloud_b', 14, '101');
+VALUES ('cloud_b', 17, '101');
 
 INSERT INTO ros_nodes_error_record (node_type, node_name, error_msg)
 VALUES ('controller', 'controller', 'testing_error');
@@ -128,7 +128,7 @@ SELECT * FROM command_map;
 
 SELECT * FROM modes_record;
 
-SELECT * FROM self_urgent_stop_commands_record;
+SELECT * FROM self_urgent_stop_commands_record ORDER BY timestamp DESC LIMIT 10;
 
 SELECT * FROM ros_nodes_configs;
 
