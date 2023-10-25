@@ -26,8 +26,8 @@ services:
   python_cont_2:
     image: aii-python3:latest
     depends_on:
-      - python_cont_1
-    # network_mode: host
+      - postgres-db
+    network_mode: host
     environment:
       - LOG_LEVEL=DEBUG
       - POSTGRES_SERVICE_NAME=postgres-db

@@ -74,6 +74,7 @@ INSERT INTO current_panel_selection (id) VALUES (1);
 
 INSERT INTO current_machine_control_flags (id) VALUES (1);
 
+INSERT INTO machine_online_heartbeat (id) VALUES (1);
 
 
 INSERT INTO machine_registration_record (is_registered, registered_by_id, registered_source_id, factory_id, factory_name, machine_id)
