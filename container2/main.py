@@ -57,10 +57,10 @@ VALID_TXN_TYPE = "valid_txn_type"
 # BATCHES_RECORD = "batches_record"
 # LONGAN_LOT_INFO_RECORD = "longan_lot_info_record"
 
-USER_ACCOUNT_DM = "user_account_dm"
-FACTORY_INFO_DM = "factory_info_dm"
+USER_DM = "user_dm"
+FACTORY_DM = "factory_dm"
 FACTORY_ACCOUNT_DM = "factory_account_dm"
-MACHINE_INFO_DM = "machine_info_dm"
+MACHINE_DM = "machine_dm"
 MACHINE_PROPERTIES_INFO_DM = "machine_properties_info_dm"
 PROMO_RECORD_DM = "promo_record_dm"
 BATCH_RECORD_DM = "batch_record_dm"
@@ -73,11 +73,11 @@ TOKEN_GIFT_TXN_DM = "token_gift_txn_dm"
 TOKEN_ADJUSTMENT_TXN_DM = "token_adjustment_txn_dm"
 TOKEN_LONGAN_LOT_USAGE_TXN_DM = "token_longan_lot_usage_txn_dm"
 TOKEN_TXN_JOURNAL_DM = "token_txn_journal_dm"
-TOKEN_BALANCE_DM = "token_balance_dm"
-TOKEN_USAGE_DM = "token_usage_dm"
-TOKEN_PURCHASE_DM = "token_purchase_dm"
-TOKEN_GIFT_DM = "token_gift_dm"
-TOKEN_ADJUSTMENT_DM = "token_adjustment_dm"
+TOKEN_BALANCE_ACCOUNT_DM = "token_balance_account_dm"
+TOKEN_USAGE_ACCOUNT_DM = "token_usage_account_dm"
+TOKEN_PURCHASE_ACCOUNT_DM = "token_purchase_account_dm"
+TOKEN_GIFT_ACCOUNT_DM = "token_gift_account_dm"
+TOKEN_ADJUSTMENT_ACCOUNT_DM = "token_adjustment_account_dm"
 
 
 # CURRENT_FACTORY_INFO = "current_factory_info"
@@ -93,8 +93,9 @@ INSERT_TO_CREATE_RELATED_ACCOUNTS_FOR_FACTORY = "insert_to_create_related_accoun
 UPDATE_LATEST_TOKEN_EXCHANGE_RATE_END_DATE = "update_latest_token_exchange_rate_end_date"
 UPDATE_LATEST_TOKEN_TO_LONGAN_RATE_END_DATE = "update_latest_token_to_longan_rate_end_date"
 INSERT_TOKEN_LONGAN_LOT_USAGE_TXN = "insert_token_longan_lot_usage_txn"
+BEFORE_INSERT_VALIDATE_TOKEN_PURCHASE_TXN = "before_insert_validate_token_purchase_txn"
 INSERT_TOKEN_TXN_JOURNAL = "insert_token_txn_journal"
-INSERT_OR_UPDATE_TOKEN_TXN_TYPES = "insert_or_update_token_txn_types"
+INSERT_OR_UPDATE_ACCOUNTS = "insert_or_update_accounts"
 
 
 # TURN_OFF_IS_LATEST_FLAG = "turn_off_is_latest_flag"
@@ -115,6 +116,7 @@ FACTORY_INFO_INSERTED_TRIGGER = "factory_info_inserted_trigger"
 TOKEN_EXCHANGE_RATE_BEFORE_INSERTED_TRIGGER = "token_exchange_rate_before_inserted_trigger"
 TOKEN_TO_LONGAN_RATE_BEFORE_INSERTED_TRIGGER = "token_to_longan_rate_before_inserted_trigger"
 LONGAN_LOT_INFO_INSERTED_TRIGGER = "longan_lot_info_inserted_trigger"
+TOKEN_PURCHASE_TXN_BEFORE_INSERTED_TRIGGER = "token_purchase_txn_before_inserted_trigger"
 TOKEN_PURCHASE_TXN_INSERTED_TRIGGER = "token_purchase_txn_inserted_trigger"
 TOKEN_GIFT_TXN_INSERTED_TRIGGER = "token_gift_txn_inserted_trigger"
 TOKEN_ADJUSTMENT_TXN_INSERTED_TRIGGER = "token_adjustment_txn_inserted_trigger"
@@ -145,7 +147,20 @@ TOKEN_TXN_JOURNAL_INSERTED_TRIGGER = "token_txn_journal_inserted_trigger"
 # COMMAND_MAP_NODE_CONFIG_MAP_BEFORE_INSERT_TRIGGER = "command_map_node_config_map_before_insert_trigger"
 
 
+DEBUGING_TABLE = "debuging_table"
+
 DATABASE_TABLES = {
+    DEBUGING_TABLE : f"""
+        CREATE TABLE {DEBUGING_TABLE} (
+            id SERIAL PRIMARY KEY,
+            debug_name VARCHAR(255),
+            var_type VARCHAR(255),
+            text_type TEXT,
+            int_type INTEGER,
+            decimal_type DECIMAl,
+            bool_type BOOLEAN
+        );
+    """,
     VALID_TXN_TYPE : f"""
         CREATE TABLE {VALID_TXN_TYPE} (
             id SERIAL PRIMARY KEY,
@@ -153,34 +168,34 @@ DATABASE_TABLES = {
             timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """,
-    USER_ACCOUNT_DM: f"""
-        CREATE TABLE {USER_ACCOUNT_DM} (
+    USER_DM: f"""
+        CREATE TABLE {USER_DM} (
             id SERIAL PRIMARY KEY,
             username VARCHAR(255) NOT NULL UNIQUE,
             user_role VARCHAR(16),
             account_registered_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """,
-    FACTORY_INFO_DM : f"""
-        CREATE TABLE {FACTORY_INFO_DM} (
+    FACTORY_DM : f"""
+        CREATE TABLE {FACTORY_DM} (
             id SERIAL PRIMARY KEY,
             factory_name VARCHAR(255),
             factory_address VARCHAR(255),
             factory_location VARCHAR(255),
-            created_by INTEGER REFERENCES {USER_ACCOUNT_DM}(id),
+            created_by INTEGER REFERENCES {USER_DM}(id),
             created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """,
     FACTORY_ACCOUNT_DM: f"""
         CREATE TABLE {FACTORY_ACCOUNT_DM} (
             id SERIAL PRIMARY KEY,
-            factory_id INTEGER REFERENCES {FACTORY_INFO_DM}(id),
+            factory_id INTEGER REFERENCES {FACTORY_DM}(id),
             account_name VARCHAR(255),
             timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """,
-    MACHINE_INFO_DM : f"""
-        CREATE TABLE {MACHINE_INFO_DM} (
+    MACHINE_DM : f"""
+        CREATE TABLE {MACHINE_DM} (
             id SERIAL PRIMARY KEY,
             machine_uid VARCHAR(255) NOT NULL UNIQUE,
             alias VARCHAR(255),
@@ -199,8 +214,8 @@ DATABASE_TABLES = {
     PROMO_RECORD_DM: f"""
         CREATE TABLE {PROMO_RECORD_DM} (
             id SERIAL PRIMARY KEY,
-            update_by INTEGER REFERENCES {USER_ACCOUNT_DM}(id),
-            approved_by INTEGER REFERENCES {USER_ACCOUNT_DM}(id),
+            update_by INTEGER REFERENCES {USER_DM}(id),
+            approved_by INTEGER REFERENCES {USER_DM}(id),
             promo_name VARCHAR(56) NOT NULL UNIQUE,
             promo_description TEXT,
             promo_constraint_function_name VARCHAR(255),
@@ -215,8 +230,8 @@ DATABASE_TABLES = {
     BATCH_RECORD_DM: f"""
         CREATE TABLE {BATCH_RECORD_DM} (
             id SERIAL PRIMARY KEY,
-            factory_id INTEGER REFERENCES {FACTORY_INFO_DM}(id),
-            machine_id INTEGER REFERENCES {MACHINE_INFO_DM}(id),
+            factory_id INTEGER REFERENCES {FACTORY_DM}(id),
+            machine_id INTEGER REFERENCES {MACHINE_DM}(id),
             command_record_id VARCHAR(56),
             total_longan INTEGER NOT NULL,
             total_unejected_longan INTEGER NOT NULL,
@@ -231,12 +246,13 @@ DATABASE_TABLES = {
         CREATE TABLE {LONGAN_LOT_INFO_DM} (
             id SERIAL PRIMARY KEY,
             batch_id INTEGER REFERENCES {BATCH_RECORD_DM}(id),
-            factory_id INTEGER REFERENCES {FACTORY_INFO_DM}(id),
-            machine_id INTEGER REFERENCES {MACHINE_INFO_DM}(id),
+            factory_id INTEGER REFERENCES {FACTORY_DM}(id),
+            machine_id INTEGER REFERENCES {MACHINE_DM}(id),
             lot_total_longan INTEGER NOT NULL,
             lot_unejected_longan INTEGER NOT NULL,
             lot_ejected_longan INTEGER NOT NULL,
             is_processed BOOLEAN NOT NULL DEFAULT false,
+            date DATE NOT NULL DEFAULT CURRENT_DATE,
             timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """,
@@ -254,65 +270,67 @@ DATABASE_TABLES = {
     TOKEN_EXCHANGE_RATE_DM: f"""
         CREATE TABLE {TOKEN_EXCHANGE_RATE_DM} (
             id SERIAL PRIMARY KEY,
-            update_by INTEGER REFERENCES {USER_ACCOUNT_DM}(id),
-            approved_by INTEGER REFERENCES {USER_ACCOUNT_DM}(id),
+            update_by INTEGER REFERENCES {USER_DM}(id),
+            approved_by INTEGER REFERENCES {USER_DM}(id),
             token_to_bath_exchange_rate DECIMAL(7,2) NOT NULL,
             start_apply_date DATE NOT NULL DEFAULT CURRENT_DATE,
             end_date DATE DEFAULT NULL,
-            is_active BOOLEAN NOT NULL DEFAULT false,
             timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """,
     TOKEN_LONGAN_RATE_DM: f"""
         CREATE TABLE {TOKEN_LONGAN_RATE_DM} (
             id SERIAL PRIMARY KEY,
-            update_by INTEGER REFERENCES {USER_ACCOUNT_DM}(id),
-            approved_by INTEGER REFERENCES {USER_ACCOUNT_DM}(id),
+            update_by INTEGER REFERENCES {USER_DM}(id),
+            approved_by INTEGER REFERENCES {USER_DM}(id),
             token_to_longan_rate DECIMAL(6,3) NOT NULL,
             start_apply_date DATE NOT NULL DEFAULT CURRENT_DATE,
             end_date DATE DEFAULT NULL,
-            is_active BOOLEAN NOT NULL DEFAULT false,
             timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """,
     TOKEN_PURCHASE_TXN_DM: f"""
         CREATE TABLE {TOKEN_PURCHASE_TXN_DM} (
             id SERIAL PRIMARY KEY,
-            update_by INTEGER REFERENCES {USER_ACCOUNT_DM}(id),
-            approved_by INTEGER REFERENCES {USER_ACCOUNT_DM}(id),
-            factory_id INTEGER REFERENCES {FACTORY_INFO_DM}(id),
+            update_by INTEGER REFERENCES {USER_DM}(id),
+            approved_by INTEGER REFERENCES {USER_DM}(id),
+            factory_id INTEGER REFERENCES {FACTORY_DM}(id),
             txn_reference_number VARCHAR(255),
+            token_to_bath_exchange_rate_id INTEGER NOT NULL REFERENCES {TOKEN_EXCHANGE_RATE_DM}(id),
             total_token_amt DECIMAL(12,2) NOT NULL,
             purchase_token_amt DECIMAL(12,2) NOT NULL,
             bath_amt DECIMAL(12,2) NOT NULL,
             promo_token_amt DECIMAL(12,2) DEFAULT NULL,
             promo_name VARCHAR(56) DEFAULT NULL,
             is_processed BOOLEAN NOT NULL DEFAULT false,
+            date DATE NOT NULL DEFAULT CURRENT_DATE,
             timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """,
     TOKEN_GIFT_TXN_DM: f"""
         CREATE TABLE {TOKEN_GIFT_TXN_DM} (
             id SERIAL PRIMARY KEY,
-            update_by INTEGER REFERENCES {USER_ACCOUNT_DM}(id),
-            approved_by INTEGER REFERENCES {USER_ACCOUNT_DM}(id),
-            factory_id INTEGER REFERENCES {FACTORY_INFO_DM}(id),
+            update_by INTEGER REFERENCES {USER_DM}(id),
+            approved_by INTEGER REFERENCES {USER_DM}(id),
+            factory_id INTEGER REFERENCES {FACTORY_DM}(id),
             note TEXT,
             token_amt DECIMAL(12,2) NOT NULL,
             is_processed BOOLEAN NOT NULL DEFAULT false,
+            date DATE NOT NULL DEFAULT CURRENT_DATE,
             timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """,
     TOKEN_ADJUSTMENT_TXN_DM: f"""
         CREATE TABLE {TOKEN_ADJUSTMENT_TXN_DM} (
             id SERIAL PRIMARY KEY,
-            update_by INTEGER REFERENCES {USER_ACCOUNT_DM}(id),
-            approved_by INTEGER REFERENCES {USER_ACCOUNT_DM}(id),
-            factory_id INTEGER REFERENCES {FACTORY_INFO_DM}(id),
+            update_by INTEGER REFERENCES {USER_DM}(id),
+            approved_by INTEGER REFERENCES {USER_DM}(id),
+            factory_id INTEGER REFERENCES {FACTORY_DM}(id),
             note TEXT,
             token_amt DECIMAL(12,2) NOT NULL,
             adjustment_type VARCHAR(16) CHECK (adjustment_type IN ('add', 'subtract')),
             is_processed BOOLEAN NOT NULL DEFAULT false,
+            date DATE NOT NULL DEFAULT CURRENT_DATE,
             timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """,
@@ -321,34 +339,35 @@ DATABASE_TABLES = {
             id SERIAL PRIMARY KEY,
             lot_id INTEGER REFERENCES {LONGAN_LOT_INFO_DM}(id),
             token_longan_rate_id INTEGER REFERENCES {TOKEN_LONGAN_RATE_DM}(id),
-            factory_id INTEGER REFERENCES {FACTORY_INFO_DM}(id),
-            machine_id INTEGER REFERENCES {MACHINE_INFO_DM}(id),
+            factory_id INTEGER REFERENCES {FACTORY_DM}(id),
+            machine_id INTEGER REFERENCES {MACHINE_DM}(id),
             longan_amt INTEGER NOT NULL,
-            token_to_longan_rate DECIMAL(6,3) NOT NULL,
+            token_to_longan_rate DECIMAL(6,3),
             token_usage_amt DECIMAL(10,3) NOT NULL,
             is_processed BOOLEAN NOT NULL DEFAULT false,
+            date DATE NOT NULL DEFAULT CURRENT_DATE,
             timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """,
     TOKEN_TXN_JOURNAL_DM: f"""
         CREATE TABLE {TOKEN_TXN_JOURNAL_DM} (
             id SERIAL PRIMARY KEY,
-            factory_id INTEGER REFERENCES {FACTORY_INFO_DM}(id),
-            machine_id INTEGER REFERENCES {MACHINE_INFO_DM}(id),
+            factory_id INTEGER REFERENCES {FACTORY_DM}(id),
+            machine_id INTEGER REFERENCES {MACHINE_DM}(id),
             account_id INTEGER REFERENCES {FACTORY_ACCOUNT_DM}(id),
             txn_type_id INTEGER REFERENCES {VALID_TXN_TYPE}(id),
             txn_id VARCHAR(56) NOT NULL,
             txn_token_amt DECIMAL(10,3) NOT NULL,
             txn_entry_type VARCHAR(16) CHECK (txn_entry_type IN ('credit', 'debit')),
             is_processed BOOLEAN NOT NULL DEFAULT false,
-            date DATE NOT NULL DEFAULT CURRENT_DATE,  
+            date DATE NOT NULL DEFAULT CURRENT_DATE,
             timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """,
-    TOKEN_BALANCE_DM: f"""
-        CREATE TABLE {TOKEN_BALANCE_DM} (
+    TOKEN_BALANCE_ACCOUNT_DM: f"""
+        CREATE TABLE {TOKEN_BALANCE_ACCOUNT_DM} (
             id SERIAL PRIMARY KEY,
-            factory_id INTEGER REFERENCES {FACTORY_INFO_DM}(id),
+            factory_id INTEGER REFERENCES {FACTORY_DM}(id),
             last_token_journal_id INTEGER REFERENCES {TOKEN_TXN_JOURNAL_DM}(id),    
             account_id INTEGER REFERENCES {FACTORY_ACCOUNT_DM}(id),
             token_balance_amt DECIMAL(10,3) NOT NULL,
@@ -356,11 +375,11 @@ DATABASE_TABLES = {
             timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """,
-    TOKEN_USAGE_DM: f"""
-        CREATE TABLE {TOKEN_USAGE_DM} (
+    TOKEN_USAGE_ACCOUNT_DM: f"""
+        CREATE TABLE {TOKEN_USAGE_ACCOUNT_DM} (
             id SERIAL PRIMARY KEY,
-            factory_id INTEGER REFERENCES {FACTORY_INFO_DM}(id),
-            machine_id INTEGER REFERENCES {MACHINE_INFO_DM}(id),
+            factory_id INTEGER REFERENCES {FACTORY_DM}(id),
+            machine_id INTEGER REFERENCES {MACHINE_DM}(id),
             last_token_journal_id INTEGER REFERENCES {TOKEN_TXN_JOURNAL_DM}(id),    
             account_id INTEGER REFERENCES {FACTORY_ACCOUNT_DM}(id),
             token_usage_amt DECIMAL(10,3) NOT NULL,
@@ -368,10 +387,10 @@ DATABASE_TABLES = {
             timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """,
-    TOKEN_PURCHASE_DM: f"""
-        CREATE TABLE {TOKEN_PURCHASE_DM} (
+    TOKEN_PURCHASE_ACCOUNT_DM: f"""
+        CREATE TABLE {TOKEN_PURCHASE_ACCOUNT_DM} (
             id SERIAL PRIMARY KEY,
-            factory_id INTEGER REFERENCES {FACTORY_INFO_DM}(id),
+            factory_id INTEGER REFERENCES {FACTORY_DM}(id),
             last_token_journal_id INTEGER REFERENCES {TOKEN_TXN_JOURNAL_DM}(id),    
             account_id INTEGER REFERENCES {FACTORY_ACCOUNT_DM}(id),
             token_purchase_amt DECIMAL(10,3) NOT NULL,
@@ -379,10 +398,10 @@ DATABASE_TABLES = {
             timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """,
-    TOKEN_GIFT_DM: f"""
-        CREATE TABLE {TOKEN_GIFT_DM} (
+    TOKEN_GIFT_ACCOUNT_DM: f"""
+        CREATE TABLE {TOKEN_GIFT_ACCOUNT_DM} (
             id SERIAL PRIMARY KEY,
-            factory_id INTEGER REFERENCES {FACTORY_INFO_DM}(id),
+            factory_id INTEGER REFERENCES {FACTORY_DM}(id),
             last_token_journal_id INTEGER REFERENCES {TOKEN_TXN_JOURNAL_DM}(id),    
             account_id INTEGER REFERENCES {FACTORY_ACCOUNT_DM}(id),
             token_gift_amt DECIMAL(10,3) NOT NULL,
@@ -390,10 +409,10 @@ DATABASE_TABLES = {
             timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """,
-    TOKEN_ADJUSTMENT_DM: f"""
-        CREATE TABLE {TOKEN_ADJUSTMENT_DM} (
+    TOKEN_ADJUSTMENT_ACCOUNT_DM: f"""
+        CREATE TABLE {TOKEN_ADJUSTMENT_ACCOUNT_DM} (
             id SERIAL PRIMARY KEY,
-            factory_id INTEGER REFERENCES {FACTORY_INFO_DM}(id),
+            factory_id INTEGER REFERENCES {FACTORY_DM}(id),
             last_token_journal_id INTEGER REFERENCES {TOKEN_TXN_JOURNAL_DM}(id),    
             account_id INTEGER REFERENCES {FACTORY_ACCOUNT_DM}(id),
             token_adjust_amt DECIMAL(10,3) NOT NULL,
@@ -430,50 +449,23 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
             _token_to_longan_rate DECIMAL;
             _token_usage_amt DECIMAL;
         BEGIN
-            IF EXISTS (SELECT 1 FROM {TOKEN_LONGAN_RATE_DM} WHERE is_active = true and end_date >= CURRENT_DATE) THEN
-                UPDATE {TOKEN_LONGAN_RATE_DM} SET is_active = false;
-                UPDATE {TOKEN_LONGAN_RATE_DM} SET is_active = true WHERE id = (
-                    SELECT id FROM {TOKEN_LONGAN_RATE_DM}
-                    WHERE CURRENT_DATE >= start_apply_date AND (end_date IS NULL OR CURRENT_DATE < end_date)
-                    ORDER BY timestamp DESC
-                    LIMIT 1
-                );
-            ELSIF NOT EXISTS (SELECT 1 FROM {TOKEN_LONGAN_RATE_DM} WHERE is_active = true) THEN
-                UPDATE {TOKEN_LONGAN_RATE_DM} SET is_active = true WHERE id = (
-                    SELECT id FROM {TOKEN_LONGAN_RATE_DM}
-                    WHERE CURRENT_DATE >= start_apply_date AND (end_date IS NULL OR CURRENT_DATE < end_date)
-                    ORDER BY timestamp DESC
-                    LIMIT 1
-                );
-            END IF;
             SELECT id, token_to_longan_rate INTO _token_longan_rate_id, _token_to_longan_rate 
-            FROM {TOKEN_LONGAN_RATE_DM} WHERE is_active = true;
+            FROM {TOKEN_LONGAN_RATE_DM} WHERE NEW.date >= start_apply_date AND (end_date IS NULL OR NEW.date < end_date);
             IF _token_longan_rate_id IS NOT NULL AND _token_to_longan_rate IS NOT NULL THEN
                 _token_usage_amt := _token_to_longan_rate * NEW.lot_total_longan;
                 INSERT INTO {TOKEN_LONGAN_LOT_USAGE_TXN_DM} (
                     lot_id, token_longan_rate_id, 
                     factory_id, machine_id, longan_amt, 
-                    token_to_longan_rate, token_usage_amt
+                    token_to_longan_rate, token_usage_amt, date
                     ) VALUES (
                     NEW.id, _token_longan_rate_id, NEW.factory_id,
                     NEW.machine_id, NEW.lot_total_longan,
-                    _token_to_longan_rate, _token_usage_amt
+                    _token_to_longan_rate, _token_usage_amt, NEW.date
                     );
+                UPDATE {LONGAN_LOT_INFO_DM} SET is_processed = true WHERE id = NEW.id;
             ELSE
-                -- if no token_longan_rate or token_longan_rate_id, 
-                -- still keep record but not calculate the token usage and set to 0
-                _token_usage_amt := 0.0;
-                INSERT INTO {TOKEN_LONGAN_LOT_USAGE_TXN_DM} (
-                    lot_id, token_longan_rate_id, 
-                    factory_id, machine_id, longan_amt, 
-                    token_to_longan_rate, token_usage_amt
-                    ) VALUES (
-                    NEW.id, _token_longan_rate_id, NEW.factory_id,
-                    NEW.machine_id, NEW.lot_total_longan,
-                    _token_to_longan_rate, _token_usage_amt
-                    );
-            END IF;
-            UPDATE {LONGAN_LOT_INFO_DM} SET is_processed = true WHERE id = NEW.id;
+                RETURN NULL;
+            END IF;            
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
@@ -482,10 +474,14 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
         CREATE OR REPLACE FUNCTION {UPDATE_LATEST_TOKEN_EXCHANGE_RATE_END_DATE}()
         RETURNS TRIGGER AS $$
         BEGIN
-            UPDATE {TOKEN_EXCHANGE_RATE_DM} SET end_date = NEW.start_apply_date
-            WHERE id = (
-                SELECT id FROM {TOKEN_EXCHANGE_RATE_DM} ORDER BY timestamp DESC LIMIT 1
-            );
+            IF EXISTS (SELECT 1 FROM {TOKEN_EXCHANGE_RATE_DM} WHERE start_apply_date > NEW.start_apply_date ORDER BY start_apply_date ASC LIMIT 1) THEN
+                NEW.end_date := (SELECT start_apply_date FROM {TOKEN_EXCHANGE_RATE_DM} WHERE start_apply_date > NEW.start_apply_date ORDER BY start_apply_date ASC LIMIT 1);
+            ELSE
+                UPDATE {TOKEN_EXCHANGE_RATE_DM} SET end_date = NEW.start_apply_date
+                WHERE id = (
+                    SELECT id FROM {TOKEN_EXCHANGE_RATE_DM} ORDER BY timestamp DESC LIMIT 1
+                );
+            END IF;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
@@ -494,14 +490,49 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
         CREATE OR REPLACE FUNCTION {UPDATE_LATEST_TOKEN_TO_LONGAN_RATE_END_DATE}()
         RETURNS TRIGGER AS $$
         BEGIN
-            UPDATE {TOKEN_LONGAN_RATE_DM} SET end_date = NEW.start_apply_date
-            WHERE id = (
-                SELECT id FROM {TOKEN_LONGAN_RATE_DM} ORDER BY timestamp DESC LIMIT 1
-            );
+            IF EXISTS (SELECT 1 FROM {TOKEN_LONGAN_RATE_DM} WHERE start_apply_date > NEW.start_apply_date ORDER BY start_apply_date ASC LIMIT 1) THEN
+                NEW.end_date := (SELECT start_apply_date FROM {TOKEN_LONGAN_RATE_DM} WHERE start_apply_date > NEW.start_apply_date ORDER BY start_apply_date ASC LIMIT 1);
+            ELSE
+                UPDATE {TOKEN_LONGAN_RATE_DM} SET end_date = NEW.start_apply_date
+                WHERE id = (
+                    SELECT id FROM {TOKEN_LONGAN_RATE_DM} ORDER BY timestamp DESC LIMIT 1
+                );
+            END IF;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
     """,    
+    BEFORE_INSERT_VALIDATE_TOKEN_PURCHASE_TXN : f"""
+        CREATE OR REPLACE FUNCTIOn {BEFORE_INSERT_VALIDATE_TOKEN_PURCHASE_TXN}()
+        RETURNS TRIGGER AS $$
+        DECLARE
+            exchange_rate DECIMAL;
+            exchange_rate_calculated_purchase_token_amt DECIMAL;
+            _promo_token_amt DECIMAL;
+            calculated_promo_token_amt DECIMAL;
+        BEGIN
+            SELECT token_to_bath_exchange_rate INTO exchange_rate FROM {TOKEN_EXCHANGE_RATE_DM} 
+            WHERE id = NEW.token_to_bath_exchange_rate_id AND NEW.date >= start_apply_date AND (end_date IS NULL OR NEW.date < end_date);
+            exchange_rate_calculated_purchase_token_amt := exchange_rate * NEW.bath_amt;
+            -- INSERT INTO {DEBUGING_TABLE} (debug_name, decimal_type) VALUES ('exchange_rate_calculated_purchase_token_amt', exchange_rate_calculated_purchase_token_amt);
+            IF NEW.promo_token_amt IS NULL THEN
+                _promo_token_amt := 0.0;
+            END IF;
+            -- promo token amt will be calculated using promo id provided and the bath amt spend
+            -- for now checking promo function will not available yet
+            calculated_promo_token_amt := _promo_token_amt;
+            -- INSERT INTO {DEBUGING_TABLE} (debug_name, decimal_type) VALUES ('calculated_promo_token_amt', calculated_promo_token_amt);
+            IF (exchange_rate_calculated_purchase_token_amt = NEW.purchase_token_amt) AND (calculated_promo_token_amt = _promo_token_amt) THEN
+                INSERT INTO {DEBUGING_TABLE} (debug_name, bool_type) VALUES ('both match the calculation', true);
+                IF NEW.total_token_amt = (NEW.purchase_token_amt + _promo_token_amt) THEN
+                    -- INSERT INTO {DEBUGING_TABLE} (debug_name, bool_type) VALUES ('both add up to total amt', true);
+                    RETURN NEW;
+                END IF;
+            END IF;
+            RETURN NULL;
+        END;
+        $$ LANGUAGE plpgsql;
+    """,
     INSERT_TOKEN_TXN_JOURNAL : f"""
         CREATE OR REPLACE FUNCTION {INSERT_TOKEN_TXN_JOURNAL}()
         RETURNS TRIGGER AS $$
@@ -563,23 +594,23 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
             IF _account_id IS NOT NULL THEN
                 INSERT INTO {TOKEN_TXN_JOURNAL_DM}(
                 factory_id, machine_id, account_id, txn_type_id, 
-                txn_id, txn_token_amt, txn_entry_type
+                txn_id, txn_token_amt, txn_entry_type, date
                 ) VALUES 
                 (
                     NEW.factory_id, _machine_id, _account_id, _txn_type_id,
-                    NEW.id, _txn_token_amt, _first_txn_entry_type
+                    NEW.id, _txn_token_amt, _first_txn_entry_type, NEW.date
                 ),
                 (
                     NEW.factory_id, _machine_id, _wallet_account_id, _txn_type_id,
-                    NEW.id, _txn_token_amt, _second_txn_entry_type
+                    NEW.id, _txn_token_amt, _second_txn_entry_type, NEW.date
                 );
             END IF;
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
     """,
-    INSERT_OR_UPDATE_TOKEN_TXN_TYPES : f"""
-        CREATE OR REPLACE FUNCTION {INSERT_OR_UPDATE_TOKEN_TXN_TYPES}()
+    INSERT_OR_UPDATE_ACCOUNTS : f"""
+        CREATE OR REPLACE FUNCTION {INSERT_OR_UPDATE_ACCOUNTS}()
         RETURNS TRIGGER AS $$
         DECLARE
             _account_name VARCHAR;
@@ -591,61 +622,63 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
                 IF NEW.txn_entry_type = 'credit' THEN
                     NEW.txn_token_amt := -NEW.txn_token_amt;
                 END IF;
-                IF EXISTS (SELECT 1  FROM {TOKEN_BALANCE_DM} WHERE date = CURRENT_DATE AND factory_id = NEW.factory_id) THEN
-                    UPDATE {TOKEN_BALANCE_DM} 
+                IF EXISTS (SELECT 1  FROM {TOKEN_BALANCE_ACCOUNT_DM} WHERE date = NEW.date AND factory_id = NEW.factory_id) THEN
+                    UPDATE {TOKEN_BALANCE_ACCOUNT_DM} 
                     SET last_token_journal_id = NEW.id, 
                     token_balance_amt = token_balance_amt + NEW.txn_token_amt, 
                     timestamp = CURRENT_TIMESTAMP 
-                    WHERE date = CURRENT_DATE AND factory_id = NEW.factory_id;
+                    WHERE date = NEW.date AND factory_id = NEW.factory_id;
                 ELSE
-                    SELECT token_balance_amt INTO _latest_token_balance_amt FROM {TOKEN_BALANCE_DM}
-                    WHERE factory_id = NEW.factory_id AND account_id = NEW.account_id ORDER BY timestamp DESC LIMIT 1;
+                    SELECT token_balance_amt INTO _latest_token_balance_amt FROM {TOKEN_BALANCE_ACCOUNT_DM}
+                    WHERE factory_id = NEW.factory_id AND account_id = NEW.account_id AND date < NEW.date ORDER BY date DESC, timestamp DESC LIMIT 1;
                     IF _latest_token_balance_amt IS NULL THEN
                         _latest_token_balance_amt := 0;
                     END IF;
-                    INSERT INTO {TOKEN_BALANCE_DM}(
-                        factory_id, last_token_journal_id, account_id, token_balance_amt
+                    INSERT INTO {TOKEN_BALANCE_ACCOUNT_DM}(
+                        factory_id, last_token_journal_id, account_id, token_balance_amt, date
                         ) VALUES (
-                            NEW.factory_id, NEW.id, NEW.account_id,_latest_token_balance_amt + NEW.txn_token_amt 
+                            NEW.factory_id, NEW.id, NEW.account_id,_latest_token_balance_amt + NEW.txn_token_amt, NEW.date 
                             );
                 END IF;
+                -- adjust the account balance according to the new purchase txn insert data
+                UPDATE {TOKEN_BALANCE_ACCOUNT_DM} SET token_balance_amt = token_balance_amt + NEW.txn_token_amt, timestamp = CURRENT_TIMESTAMP WHERE date > NEW.date AND account_id = NEW.account_id;
             ELSIF _account_name = 'purchase account' THEN
-                IF EXISTS (SELECT 1  FROM {TOKEN_PURCHASE_DM} WHERE date = CURRENT_DATE AND factory_id = NEW.factory_id) THEN
-                    UPDATE {TOKEN_PURCHASE_DM} 
+                IF EXISTS (SELECT 1  FROM {TOKEN_PURCHASE_ACCOUNT_DM} WHERE date = NEW.date AND factory_id = NEW.factory_id) THEN
+                    UPDATE {TOKEN_PURCHASE_ACCOUNT_DM} 
                     SET last_token_journal_id = NEW.id, 
                     token_purchase_amt = token_purchase_amt + NEW.txn_token_amt, 
                     timestamp = CURRENT_TIMESTAMP 
-                    WHERE date = CURRENT_DATE AND factory_id = NEW.factory_id;
+                    WHERE date = NEW.date AND factory_id = NEW.factory_id;
                 ELSE
-                    INSERT INTO {TOKEN_PURCHASE_DM}(
-                        factory_id, last_token_journal_id, account_id, token_purchase_amt
+                    INSERT INTO {TOKEN_PURCHASE_ACCOUNT_DM}(
+                        factory_id, last_token_journal_id, account_id, token_purchase_amt, date
                         ) VALUES (
-                            NEW.factory_id, NEW.id, NEW.account_id, NEW.txn_token_amt 
+                            NEW.factory_id, NEW.id, NEW.account_id, NEW.txn_token_amt, NEW.date 
                             );
                 END IF;
             ELSIF _account_name = 'usage account' THEN
-                IF EXISTS (SELECT 1  FROM {TOKEN_USAGE_DM} WHERE date = CURRENT_DATE AND factory_id = NEW.factory_id AND machine_id = NEW.machine_id) THEN
-                    UPDATE {TOKEN_USAGE_DM} 
+                IF EXISTS (SELECT 1  FROM {TOKEN_USAGE_ACCOUNT_DM} WHERE date = NEW.date AND factory_id = NEW.factory_id AND machine_id = NEW.machine_id) THEN
+                    UPDATE {TOKEN_USAGE_ACCOUNT_DM} 
                     SET last_token_journal_id = NEW.id, 
                     token_usage_amt = token_usage_amt + NEW.txn_token_amt, 
                     timestamp = CURRENT_TIMESTAMP 
-                    WHERE date = CURRENT_DATE AND factory_id = NEW.factory_id;
+                    WHERE date = NEW.date AND factory_id = NEW.factory_id;
                 ELSE
-                    INSERT INTO {TOKEN_USAGE_DM}(
-                        factory_id, machine_id, last_token_journal_id, account_id, token_usage_amt
+                    INSERT INTO {TOKEN_USAGE_ACCOUNT_DM}(
+                        factory_id, machine_id, last_token_journal_id, account_id, token_usage_amt, date
                         ) VALUES (
-                            NEW.factory_id, NEW.machine_id, NEW.id, NEW.account_id, NEW.txn_token_amt 
+                            NEW.factory_id, NEW.machine_id, NEW.id, NEW.account_id, NEW.txn_token_amt, NEW.date 
                             );
                 END IF;            
             ELSIF _account_name = 'gift account' THEN
-                IF EXISTS (SELECT 1  FROM {TOKEN_GIFT_DM} WHERE date = CURRENT_DATE AND factory_id = NEW.factory_id) THEN
-                    UPDATE {TOKEN_GIFT_DM} 
+                IF EXISTS (SELECT 1  FROM {TOKEN_GIFT_ACCOUNT_DM} WHERE date = NEW.date AND factory_id = NEW.factory_id) THEN
+                    UPDATE {TOKEN_GIFT_ACCOUNT_DM} 
                     SET last_token_journal_id = NEW.id, 
                     token_gift_amt = token_gift_amt + NEW.txn_token_amt, 
                     timestamp = CURRENT_TIMESTAMP 
-                    WHERE date = CURRENT_DATE AND factory_id = NEW.factory_id;
+                    WHERE date = NEW.date AND factory_id = NEW.factory_id;
                 ELSE
-                    INSERT INTO {TOKEN_GIFT_DM}(
+                    INSERT INTO {TOKEN_GIFT_ACCOUNT_DM}(
                         factory_id, last_token_journal_id, account_id, token_gift_amt
                         ) VALUES (
                             NEW.factory_id, NEW.id, NEW.account_id, NEW.txn_token_amt 
@@ -655,17 +688,17 @@ PROCEDURES_CREATE_SQL_COMMANDS_DICT = {
                 IF NEW.txn_entry_type = 'debit' THEN
                     NEW.txn_token_amt := -NEW.txn_token_amt;
                 END IF;
-                IF EXISTS (SELECT 1  FROM {TOKEN_ADJUSTMENT_DM} WHERE date = CURRENT_DATE AND factory_id = NEW.factory_id) THEN
-                    UPDATE {TOKEN_ADJUSTMENT_DM} 
+                IF EXISTS (SELECT 1  FROM {TOKEN_ADJUSTMENT_ACCOUNT_DM} WHERE date = NEW.date AND factory_id = NEW.factory_id) THEN
+                    UPDATE {TOKEN_ADJUSTMENT_ACCOUNT_DM} 
                     SET last_token_journal_id = NEW.id, 
                     token_adjust_amt = token_adjust_amt + NEW.txn_token_amt, 
                     timestamp = CURRENT_TIMESTAMP 
-                    WHERE date = CURRENT_DATE AND factory_id = NEW.factory_id;
+                    WHERE date = NEW.date AND factory_id = NEW.factory_id;
                 ELSE
-                    INSERT INTO {TOKEN_ADJUSTMENT_DM}(
-                        factory_id, last_token_journal_id, account_id, token_adjust_amt
+                    INSERT INTO {TOKEN_ADJUSTMENT_ACCOUNT_DM}(
+                        factory_id, last_token_journal_id, account_id, token_adjust_amt, date
                         ) VALUES (
-                            NEW.factory_id, NEW.id, NEW.account_id, NEW.txn_token_amt 
+                            NEW.factory_id, NEW.id, NEW.account_id, NEW.txn_token_amt, NEW.date 
                             );
                 END IF;
             END IF;
@@ -682,7 +715,7 @@ TRIGGERS_CREATE_SQL_COMMAND_STRING = f"""
         BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = '{FACTORY_INFO_INSERTED_TRIGGER}') THEN
                 CREATE TRIGGER {FACTORY_INFO_INSERTED_TRIGGER}
-                AFTER INSERT ON {FACTORY_INFO_DM}
+                AFTER INSERT ON {FACTORY_DM}
                 FOR EACH ROW
                 EXECUTE FUNCTION {INSERT_TO_CREATE_RELATED_ACCOUNTS_FOR_FACTORY}();
             END IF;
@@ -718,6 +751,17 @@ TRIGGERS_CREATE_SQL_COMMAND_STRING = f"""
                 AFTER INSERT ON {LONGAN_LOT_INFO_DM}
                 FOR EACH ROW
                 EXECUTE FUNCTION {INSERT_TOKEN_LONGAN_LOT_USAGE_TXN}();
+            END IF;
+        END $$;
+
+        -- Trigger on new token purchase txn data before inserted to validate token_purchase_txn data
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = '{TOKEN_PURCHASE_TXN_BEFORE_INSERTED_TRIGGER}') THEN
+                CREATE TRIGGER {TOKEN_PURCHASE_TXN_BEFORE_INSERTED_TRIGGER}
+                BEFORE INSERT ON {TOKEN_PURCHASE_TXN_DM}
+                FOR EACH ROW
+                EXECUTE FUNCTION {BEFORE_INSERT_VALIDATE_TOKEN_PURCHASE_TXN}();
             END IF;
         END $$;
 
@@ -772,7 +816,7 @@ TRIGGERS_CREATE_SQL_COMMAND_STRING = f"""
                 CREATE TRIGGER {TOKEN_TXN_JOURNAL_INSERTED_TRIGGER}
                 AFTER INSERT ON {TOKEN_TXN_JOURNAL_DM}
                 FOR EACH ROW
-                EXECUTE FUNCTION {INSERT_OR_UPDATE_TOKEN_TXN_TYPES}();
+                EXECUTE FUNCTION {INSERT_OR_UPDATE_ACCOUNTS}();
             END IF;
         END $$;
     """
